@@ -1,0 +1,249 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import math
+
+# ------------------------------
+# Define data
+# ------------------------------
+x = np.arange(0, 3.01, 0.01)  # 0:0.01:3
+y = np.exp(-x)
+x_size2 = len(x)  # number of points
+
+order = 4
+
+# ------------------------------
+# Construct phi
+# phi has shape (order+1, x_size2)
+# ------------------------------
+phi = np.zeros((order+1, x_size2))
+for i in range(order+1):
+    phi[i, :] = x**i
+
+# ------------------------------
+# Construct "true" theta array
+# (theta in the MATLAB code)
+# shape: (order+1, x_size2)
+# ------------------------------
+theta_true = np.zeros((order+1, x_size2))
+for i in range(order+1):
+    if i != 0:
+        theta_true[i, :] = ((-1)**i) / math.factorial(i)
+    else:
+        theta_true[i, :] = 0.0
+
+# ---------------------------------
+# Function to plot each theta
+# with subplots matching your layout
+# ---------------------------------
+def plot_theta_subplots(fig1, fig2, fig3, theta_true, theta_hat_all, x, order, offset=0, title_prefix=""):
+    """
+    fig1, fig2, fig3 are figure numbers (int)
+    offset is used if subplots are in different positions
+    """
+    for num in range(1, order+2):
+        if num <= 4:
+            plt.figure(fig1)
+            plt.subplot(2, 2, num)
+            plt.plot(x, theta_true[num-1, :], label="True θ{}".format(num-1))
+            plt.plot(x, theta_hat_all[num-1, :], '--', label="Est. θ{}".format(num-1))
+            plt.title("{}theta {}".format(title_prefix, num-1))
+            plt.legend()
+        elif num >= 5 and num <= 8:
+            plt.figure(fig2)
+            plt.subplot(2, 2, num-4)
+            plt.plot(x, theta_true[num-1, :], label="True θ{}".format(num-1))
+            plt.plot(x, theta_hat_all[num-1, :], '--', label="Est. θ{}".format(num-1))
+            plt.title("{}theta {}".format(title_prefix, num-1))
+            plt.legend()
+        elif num == 9:
+            # If order=6, we won't actually hit num=9, but just in case:
+            plt.figure(fig3)
+            plt.plot(x, theta_true[num-1, :], label="True θ{}".format(num-1))
+            plt.plot(x, theta_hat_all[num-1, :], '--', label="Est. θ{}".format(num-1))
+            plt.title("{}theta {}".format(title_prefix, num-1))
+            plt.legend()
+
+# =============================================================================
+# 1) RLS
+# =============================================================================
+alpha = 10.0
+p = (alpha**2) * np.eye(order+1)
+theta_hat = np.zeros((order+1, 1))
+theta_hat_all = theta_hat.copy()
+y_hat = []
+
+for index in range(x_size2):
+    # Make sure shape is (N,1)
+    phi_curr = phi[:, index].reshape(-1, 1)  # (order+1, 1)
+
+    # We want k = p*phi / (1 + phi^T p phi)
+    den = 1.0 + (phi_curr.T @ p @ phi_curr)  # shape (1,1)
+    den = float(den)  # convert to scalar
+    k = (p @ phi_curr) / den
+
+    # p update
+    p = p - k @ (phi_curr.T @ p)
+
+    # theta update
+    err = np.exp(-x[index]) - (phi_curr.T @ theta_hat)
+    theta_hat = theta_hat + k * err
+
+    y_hat.append(float(phi_curr.T @ theta_hat))
+    theta_hat_all = np.hstack((theta_hat_all, theta_hat))
+
+y_hat = np.array(y_hat)
+theta_hat_all = theta_hat_all[:, 1:]  # drop initial column of zeros
+
+# Plot RLS result: figure(1)
+plt.figure(1)
+plt.plot(x, y, label='y')
+plt.plot(x, y_hat, '--', linewidth=5, label='y_hat (RLS)')
+plt.title('RLS: y')
+plt.legend()
+
+# Subplots of theta (figures 2,3,4)
+plot_theta_subplots(fig1=2, fig2=3, fig3=4,
+                    theta_true=theta_true,
+                    theta_hat_all=theta_hat_all,
+                    x=x, order=order,
+                    title_prefix="RLS: ")
+
+# =============================================================================
+# 2) RLS with exponential forgetting
+# =============================================================================
+lambda_ = 0.1
+alpha = 10.0
+p = (alpha**2) * np.eye(order+1)
+theta_hat = np.zeros((order+1, 1))
+theta_hat_all = theta_hat.copy()
+y_hat = []
+
+for index in range(x_size2):
+    phi_curr = phi[:, index].reshape(-1, 1)
+    den = lambda_ + (phi_curr.T @ p @ phi_curr)  # shape (1,1)
+    den = float(den)
+    k = (p @ phi_curr) / den
+
+    p = p - k @ (phi_curr.T @ p)
+    p = p / lambda_
+
+    err = np.exp(-x[index]) - (phi_curr.T @ theta_hat)
+    theta_hat = theta_hat + k * err
+
+    y_hat.append(float(phi_curr.T @ theta_hat))
+    theta_hat_all = np.hstack((theta_hat_all, theta_hat))
+
+y_hat = np.array(y_hat)
+theta_hat_all = theta_hat_all[:, 1:]
+
+plt.figure(11)
+plt.plot(x, y, label='y')
+plt.plot(x, y_hat, '--', linewidth=5, label='y_hat (RLS + forgetting)')
+plt.title('RLS with exp forgetting: y')
+plt.legend()
+
+plot_theta_subplots(fig1=12, fig2=13, fig3=14,
+                    theta_true=theta_true,
+                    theta_hat_all=theta_hat_all,
+                    x=x, order=order,
+                    title_prefix="RLS-forget: ")
+
+# =============================================================================
+# 3) SA (Stochastic Approximation)
+# =============================================================================
+theta_hat = np.zeros((order+1, 1))
+theta_hat_all = theta_hat.copy()
+y_hat = []
+
+for index in range(x_size2):
+    phi_curr = phi[:, index].reshape(-1, 1)
+    numerator = phi_curr * (np.exp(-x[index]) - phi_curr.T @ theta_hat)
+    denominator = float(phi_curr.T @ phi_curr)
+    theta_hat = theta_hat + numerator / denominator
+
+    y_hat.append(float(phi_curr.T @ theta_hat))
+    theta_hat_all = np.hstack((theta_hat_all, theta_hat))
+
+y_hat = np.array(y_hat)
+theta_hat_all = theta_hat_all[:, 1:]
+
+plt.figure(31)
+plt.plot(x, y, label='y')
+plt.plot(x, y_hat, '--', linewidth=5, label='y_hat (SA)')
+plt.title('SA: y')
+plt.legend()
+
+plot_theta_subplots(fig1=32, fig2=33, fig3=34,
+                    theta_true=theta_true,
+                    theta_hat_all=theta_hat_all,
+                    x=x, order=order,
+                    title_prefix="SA: ")
+
+# =============================================================================
+# 4) PA (Projection Algorithm)
+# =============================================================================
+alpha_pa = 5.0  # alpha > 0
+r_pa = 1.5      # 0 < r < 2
+theta_hat = np.zeros((order+1, 1))
+theta_hat_all = theta_hat.copy()
+y_hat = []
+
+for index in range(x_size2):
+    phi_curr = phi[:, index].reshape(-1, 1)
+    numerator = r_pa * phi_curr * (np.exp(-x[index]) - phi_curr.T @ theta_hat)
+    denominator = alpha_pa + float(phi_curr.T @ phi_curr)
+    theta_hat = theta_hat + numerator / denominator
+
+    y_hat.append(float(phi_curr.T @ theta_hat))
+    theta_hat_all = np.hstack((theta_hat_all, theta_hat))
+
+y_hat = np.array(y_hat)
+theta_hat_all = theta_hat_all[:, 1:]
+
+plt.figure(41)
+plt.plot(x, y, label='y')
+plt.plot(x, y_hat, '--', linewidth=5, label='y_hat (PA)')
+plt.title('PA: y')
+plt.legend()
+
+plot_theta_subplots(fig1=42, fig2=43, fig3=44,
+                    theta_true=theta_true,
+                    theta_hat_all=theta_hat_all,
+                    x=x, order=order,
+                    title_prefix="PA: ")
+
+# =============================================================================
+# 5) LMS
+# =============================================================================
+r_lms = 1e-7  # step size, "0.0000001" in MATLAB
+theta_hat = np.zeros((order+1, 1))
+theta_hat_all = theta_hat.copy()
+y_hat = []
+
+for index in range(x_size2):
+    phi_curr = phi[:, index].reshape(-1, 1)
+    err = np.exp(-x[index]) - (phi_curr.T @ theta_hat)
+    theta_hat = theta_hat + r_lms * phi_curr * err
+
+    y_hat.append(float(phi_curr.T @ theta_hat))
+    theta_hat_all = np.hstack((theta_hat_all, theta_hat))
+
+y_hat = np.array(y_hat)
+theta_hat_all = theta_hat_all[:, 1:]
+
+plt.figure(51)
+plt.plot(x, y, label='y')
+plt.plot(x, y_hat, '--', linewidth=5, label='y_hat (LMS)')
+plt.title('LMS: y')
+plt.legend()
+
+plot_theta_subplots(fig1=52, fig2=53, fig3=54,
+                    theta_true=theta_true,
+                    theta_hat_all=theta_hat_all,
+                    x=x, order=order,
+                    title_prefix="LMS: ")
+
+# -----------------------------
+# Finally show all plots
+# -----------------------------
+plt.show()
