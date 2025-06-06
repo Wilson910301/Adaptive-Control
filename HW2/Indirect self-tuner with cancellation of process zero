@@ -1,0 +1,130 @@
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+# -------------------------------------------------------
+# 參數與初值
+# -------------------------------------------------------
+N = 100                       # 總週期
+time = np.arange(1, N + 1)    # 1‧‧‧100（對應 MATLAB 的 1:100）
+
+# 產生 uc：每 25 步切換一次 ±1
+uc = np.ones(N)
+for i in range(N // 25):
+    if (i + 1) % 2 == 0:                  # MATLAB: mod(i,2)==0（i 從 1 起）
+        uc[i * 25:(i + 1) * 25] = -1
+
+# RLS 相關
+lam = 0.99
+P   = np.diag([100, 100, 1, 1]).astype(float)
+I4  = np.eye(4)
+
+# a1 a2 b0 b1 y1 y2 u1 u2 初值
+a1 = a2 = 0.0
+b0 = 0.01
+b1 = 0.2
+y1 = y2 = 0.0
+u1 = 4.0        # 跟你 MATLAB 代碼一致
+u2 = 0.0
+theta = np.array([a1, a2, b0, b1], dtype=float)
+
+# 預先配置儲存矩陣
+all_theta = np.zeros((4, N))
+all_y     = np.zeros(N)
+u         = np.zeros(N)
+RST       = np.zeros((4, N))
+
+# -------------------------------------------------------
+# RLS 主迴圈
+# -------------------------------------------------------
+for k in range(N):                     # k = 0..99
+    # ---------------- 真實系統輸出 (固定係數) ----------------
+    y = -(-1.6065) * y1 - 0.6065 * y2 + 0.1065 * u1 + 0.0902 * u2
+
+    # ---------------- RLS 更新 -----------------------------
+    phi = np.array([-y1, -y2, u1, u2])
+    den = lam + phi @ P @ phi          # 純量
+    K   = P @ phi / den                # 4×1
+    P   = (I4 - np.outer(K, phi)) @ P / lam
+    e   = y - phi @ theta              # 預測誤差
+    theta = theta + K * e
+
+    all_theta[:, k] = theta
+    all_y[k]        = phi @ theta      # 同 MATLAB：Phi.'*theta
+
+    # 拆出係數向量（估計值）
+    a1k, a2k, b0k, b1k = theta
+
+    # ---------------- RST 係數 -----------------------------
+    am1, am2, bm0 = -1.3205, 0.4966, 0.1761
+    r1 = b1k / b0k
+    s0 = (am1 - a1k) / b0k
+    s1 = (am2 - a2k) / b0k
+    t0 = bm0 / b0k
+
+    RST[:, k] = [r1, s0, s1, t0]
+
+    # ---------------- 控制律 ------------------------------
+    u[k] = -r1 * u1 + t0 * uc[k] - s0 * y - s1 * y1
+
+    # ---------------- 時間推進 ----------------------------
+    y2, y1 = y1, all_y[k]
+    u2, u1 = u1, u[k]
+
+# -------------------------------------------------------
+# 繪圖（盡量還原 MATLAB 風格）
+# -------------------------------------------------------
+plt.figure(figsize=(10, 12))
+
+# ---- uc & y
+plt.subplot(3, 1, 1)
+plt.plot(time, uc, label='uc', linestyle='--')
+plt.plot(time, all_y, label='y')
+plt.title('uc & y')
+plt.xlabel('Time')
+plt.legend()
+plt.grid(True)
+
+# ---- 控制輸入 u
+plt.subplot(3, 1, 2)
+plt.plot(time, u, label='u')
+plt.title('u')
+plt.xlabel('Time')
+plt.grid(True)
+
+# ---- a, b 與 RST 係數（stairs→step）
+plt.subplot(3, 2, 5)                    # 3 行 2 欄 -> 左下
+plt.axhline(-1.6065, linestyle='--', color='b')
+plt.axhline( 0.6065, linestyle='--', color='r')
+plt.step(time, all_theta[0], where='post', label='a1-hat')
+plt.step(time, all_theta[1], where='post', label='a2-hat')
+plt.title('a1 / a2')
+plt.xlabel('Time')
+plt.ylim(-2, 1)
+plt.legend(); plt.grid(True)
+
+plt.subplot(3, 2, 6)                    # 右下
+plt.axhline(0.1065, linestyle='--', color='b')
+plt.axhline(0.0902, linestyle='--', color='r')
+plt.step(time, all_theta[2], where='post', label='b0-hat')
+plt.step(time, all_theta[3], where='post', label='b1-hat')
+plt.title('b0 / b1')
+plt.xlabel('Time')
+plt.ylim(0.07, None)
+plt.legend(); plt.grid(True)
+
+# ---- RST 係數單獨開一張
+plt.figure(figsize=(9, 4))
+plt.axhline(0.8467, linestyle='--', color='r')
+plt.axhline(2.6852, linestyle='--', color='b')
+plt.axhline(-1.0321, linestyle='--', color='g')
+plt.axhline(1.6531, linestyle='--', color='k')
+plt.step(time, RST[0], where='post', color='r', label='r1')
+plt.step(time, RST[1], where='post', color='b', label='s0')
+plt.step(time, RST[2], where='post', color='g', label='s1')
+plt.step(time, RST[3], where='post', color='k', label='t0')
+plt.title('RST parameters')
+plt.xlabel('Time'); plt.legend(); plt.grid(True)
+
+plt.tight_layout()
+plt.show()
